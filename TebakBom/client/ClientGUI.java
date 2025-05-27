@@ -190,6 +190,6 @@ public class ClientGUI extends JFrame {
     }
 
     public static void main(String[] args) {
-        SwingUtilities.invokeLater(() -> new ClientGUI("localhost", 8010));
+        SwingUtilities.invokeLater(() -> new ClientGUI("192.168.3.161", 8010));
     }
 }
