@@ -7,19 +7,20 @@ import java.util.concurrent.*;
 
 public class Server {
     private static final int PORT = 8010;
+    private static final int MAX_LIVES = 3;
+    private static final int GUESS_TIMEOUT = 20; // 20 seconds
+    
     private static List<PlayerHandler> players = new ArrayList<>();
+    private static Map<PlayerHandler, Integer> playerLives = new HashMap<>();
+    private static Set<Integer> usedNumbers = new HashSet<>();
+    
     private static int bombNumber;
     private static boolean gameActive = true;
-    private static Map<PlayerHandler, Integer> playerLives = new HashMap<>(); // Nyawa setiap player
-    private static final int MAX_LIVES = 3;
-    private static final int GUESS_TIMEOUT = 20; // 20 detik timeout
-    
-    // Tambahan untuk turn management
-    private static int currentPlayerIndex = 0;
     private static boolean gameInProgress = false;
-    private static Set<Integer> usedNumbers = new HashSet<>();
+    private static int currentPlayerIndex = 0;
 
     static {
+        // Create logs directory if not exists
         File logDir = new File("logs");
         if (!logDir.exists()) {
             logDir.mkdirs();
@@ -35,6 +36,7 @@ public class Server {
         }
     }
 
+<<<<<<< HEAD
    public static void main(String[] args) throws IOException {
     ServerSocket serverSocket = new ServerSocket(PORT);
     System.out.println("Server started. Waiting for players...");
@@ -61,135 +63,219 @@ public class Server {
         // Auto start game jika sudah ada 2 pemain
         if (players.size() >= 2 && !gameInProgress) {
             startGame();
+=======
+    public static void main(String[] args) throws IOException {
+        ServerSocket serverSocket = new ServerSocket(PORT);
+        System.out.println("🎮 Bomb Guessing Game Server started on port " + PORT);
+        System.out.println("⏳ Waiting for players...");
+
+        generateNewBomb();
+
+        while (true) {
+            Socket socket = serverSocket.accept();
+            PlayerHandler player = new PlayerHandler(socket, players.size() + 1);
+            players.add(player);
+            playerLives.put(player, MAX_LIVES);
+            new Thread(player).start();
+            
+            player.sendMessage("🎮 Welcome Player #" + player.getPlayerId() + "!");
+            player.sendMessage("💖 You have " + MAX_LIVES + " lives");
+            player.sendMessage("⏱️ You have " + GUESS_TIMEOUT + " seconds per turn");
+            player.sendMessage("🎯 Guess numbers between 1-10 to avoid the bomb!");
+            
+            System.out.println("👤 Player #" + player.getPlayerId() + " joined. Total players: " + players.size());
+            
+            // Auto start game if we have at least 2 players
+            if (players.size() >= 2 && !gameInProgress) {
+                startGame();
+            } else if (players.size() == 1) {
+                broadcast("⏳ Waiting for more players to join...", null);
+            }
+>>>>>>> development
         }
     }
 }
 
-    // Method untuk memulai game
+    private static void generateNewBomb() {
+        bombNumber = new Random().nextInt(10) + 1;
+        usedNumbers.clear();
+        System.out.println("💣 New bomb generated at number: " + bombNumber);
+    }
+
     public static synchronized void startGame() throws IOException {
         if (players.size() < 2) {
-            broadcast("⏳ Menunggu pemain lain bergabung...", null);
+            broadcast("⏳ Need at least 2 players to start the game", null);
             return;
         }
         
         if (!gameInProgress) {
             gameInProgress = true;
+            gameActive = true;
             currentPlayerIndex = 0;
-            usedNumbers.clear();
-            broadcast("🎮 Game dimulai! Total pemain: " + players.size(), null);
-            nextTurn();
+            
+            broadcast("🎮 GAME STARTED! Total players: " + players.size(), null);
+            broadcast("🎯 Avoid the bomb! Numbers 1-10 available", null);
+            logResult("Game started with " + players.size() + " players");
+            
+            // Add a small delay to ensure all messages are sent before starting turns
+            new Thread(() -> {
+                try {
+                    Thread.sleep(1000); // 1 second delay
+                    nextTurn();
+                } catch (InterruptedException | IOException e) {
+                    e.printStackTrace();
+                }
+            }).start();
         }
     }
 
-    // Method untuk giliran berikutnya
     public static synchronized void nextTurn() throws IOException {
         if (!gameActive || !gameInProgress) return;
         
-        // Cari player yang masih hidup
-        PlayerHandler currentPlayer = null;
-        int attempts = 0;
+        // Count alive players
+        long alivePlayers = players.stream()
+                .mapToInt(Server::getPlayerLives)
+                .filter(lives -> lives > 0)
+                .count();
         
+        // Check win condition
+        if (alivePlayers <= 1) {
+            endGame();
+            return;
+        }
+        
+        // Find next alive player
+        PlayerHandler currentPlayer = findNextAlivePlayer();
+        
+        if (currentPlayer != null) {
+            String statusMsg = String.format("🎯 Player #%d's turn (Lives: %d) | Alive players: %d", 
+                    currentPlayer.getPlayerId(), getPlayerLives(currentPlayer), alivePlayers);
+            broadcast(statusMsg, null);
+            
+            if (!usedNumbers.isEmpty()) {
+                broadcast("🚫 Used numbers: " + usedNumbers.toString(), null);
+            }
+            
+            // Give a small delay before sending YOUR_TURN to ensure other messages are received first
+            new Thread(() -> {
+                try {
+                    Thread.sleep(500); // 0.5 second delay
+                    currentPlayer.sendMessage("YOUR_TURN");
+                } catch (InterruptedException | IOException e) {
+                    e.printStackTrace();
+                }
+            }).start();
+        }
+    }
+
+    private static PlayerHandler findNextAlivePlayer() {
+        int attempts = 0;
         while (attempts < players.size()) {
             if (currentPlayerIndex >= players.size()) {
                 currentPlayerIndex = 0;
             }
             
-            currentPlayer = players.get(currentPlayerIndex);
-            if (getPlayerLives(currentPlayer) > 0) {
-                break;
+            PlayerHandler player = players.get(currentPlayerIndex);
+            if (getPlayerLives(player) > 0) {
+                return player;
             }
+            
             currentPlayerIndex = (currentPlayerIndex + 1) % players.size();
             attempts++;
         }
+        return null;
+    }
+
+    private static void endGame() throws IOException {
+        PlayerHandler winner = players.stream()
+                .filter(p -> getPlayerLives(p) > 0)
+                .findFirst()
+                .orElse(null);
         
-        if (currentPlayer != null && getPlayerLives(currentPlayer) > 0) {
-            broadcast("🎯 Giliran Pemain #" + currentPlayer.getPlayerId(), null);
-            currentPlayer.sendMessage("YOUR_TURN");
-            // PlayerHandler akan menangani timeout sendiri
+        if (winner != null) {
+            broadcast("🏆 GAME OVER! Player #" + winner.getPlayerId() + " WINS!", null);
+            winner.sendMessage("🎉 CONGRATULATIONS! You won the game!");
+            logResult("Player #" + winner.getPlayerId() + " wins the game");
+        } else {
+            broadcast("🤝 GAME OVER! No survivors - It's a draw!", null);
+            logResult("Game ended in a draw - no survivors");
         }
+        
+        gameActive = false;
+        gameInProgress = false;
+        
+        broadcast("🔄 Game will reset in 5 seconds...", null);
+        new Thread(Server::resetGame).start();
     }
 
     public static synchronized void checkNumber(int guessed, PlayerHandler player) throws IOException {
-        if (!gameActive) return;
+        if (!gameActive || !gameInProgress) return;
 
-        // Tambahkan ke daftar angka yang sudah digunakan
         usedNumbers.add(guessed);
+        logResult("Player #" + player.getPlayerId() + " guessed " + guessed);
 
         if (guessed == bombNumber) {
-            // Player terkena bom, kurangi nyawa
+            // Player hit the bomb
             int currentLives = playerLives.get(player) - 1;
             playerLives.put(player, currentLives);
             
-            if (currentLives > 0) {
-                player.sendMessage("💥 BOOM! Anda terkena bom! Nyawa tersisa: " + currentLives);
-                broadcast("💣 Pemain " + player.getPlayerId() + " terkena bom! Nyawa tersisa: " + currentLives, player);
-                logResult("Player " + player.getPlayerId() + " hit bomb (guess: " + guessed + "), lives left: " + currentLives);
-                
-                // Ganti angka bom baru dan reset used numbers
-                bombNumber = new Random().nextInt(10) + 1;
-                usedNumbers.clear();
-                System.out.println("Angka bom baru: " + bombNumber);
-                broadcast("🔄 Angka bom baru telah digenerate!", null);
-                
-                // Lanjut ke pemain berikutnya
-                currentPlayerIndex = (currentPlayerIndex + 1) % players.size();
-                nextTurn();
-            } else {
-                player.sendMessage("💥 BOOM! Anda terkena bom! Game Over - Nyawa habis!");
-                broadcast("💀 Pemain " + player.getPlayerId() + " terkena bom dan nyawa habis! Game Over!", player);
-                gameActive = false;
-                gameInProgress = false;
-                logResult("Player " + player.getPlayerId() + " hit bomb (guess: " + guessed + ") and eliminated. Game Over.");
-                
-                broadcast("🔁 Game akan direset dalam 3 detik...", null);
-                new Thread(Server::resetGame).start();
-            }
-        } else {
-            player.sendMessage("✅ Aman! Angka " + guessed + " bukan bom.");
-            broadcast("Pemain " + player.getPlayerId() + " menebak angka " + guessed + " dan aman.", player);
-            broadcast("ANGKA_DIPILIH:" + guessed, null);
-            logResult("Player " + player.getPlayerId() + " guessed " + guessed + " safely.");
+            player.sendMessage("💥 BOOM! You hit the bomb!");
+            broadcast("💣 Player #" + player.getPlayerId() + " hit the bomb! (Number: " + guessed + ")", player);
             
-            // Lanjut ke pemain berikutnya
-            currentPlayerIndex = (currentPlayerIndex + 1) % players.size();
-            nextTurn();
+            if (currentLives > 0) {
+                player.sendMessage("💖 Lives remaining: " + currentLives);
+                broadcast("💖 Player #" + player.getPlayerId() + " has " + currentLives + " lives left", player);
+                logResult("Player #" + player.getPlayerId() + " hit bomb, " + currentLives + " lives remaining");
+            } else {
+                player.sendMessage("💀 ELIMINATED! No lives remaining!");
+                broadcast("💀 Player #" + player.getPlayerId() + " has been ELIMINATED!", player);
+                logResult("Player #" + player.getPlayerId() + " eliminated");
+            }
+            
+            // Generate new bomb and continue
+            generateNewBomb();
+            broadcast("🔄 New bomb generated! All numbers available again.", null);
+            
+        } else {
+            // Safe guess
+            player.sendMessage("✅ SAFE! Number " + guessed + " is not the bomb.");
+            broadcast("✅ Player #" + player.getPlayerId() + " chose " + guessed + " - SAFE!", player);
+            logResult("Player #" + player.getPlayerId() + " guessed " + guessed + " safely");
         }
+        
+        // Move to next player
+        currentPlayerIndex = (currentPlayerIndex + 1) % players.size();
+        nextTurn();
     }
 
-    // Method untuk menangani timeout player
     public static synchronized void handlePlayerTimeout(PlayerHandler player) throws IOException {
-        if (!gameActive) return;
+        if (!gameActive || !gameInProgress) return;
         
+        // Generate random number that hasn't been used
         Random random = new Random();
         int randomGuess;
         int attempts = 0;
         
-        // Pastikan angka random belum dipilih dan tidak lebih dari 10 attempts
         do {
             randomGuess = random.nextInt(10) + 1;
             attempts++;
         } while (usedNumbers.contains(randomGuess) && attempts < 10);
         
-        // Jika semua angka sudah digunakan, pilih angka random tetap
+        // If all numbers used, pick any random number
         if (attempts >= 10) {
             randomGuess = random.nextInt(10) + 1;
         }
         
-        player.sendMessage("⏰ Waktu habis! Sistem memilih angka " + randomGuess + " untuk Anda.");
-        broadcast("⏰ Pemain " + player.getPlayerId() + " kehabisan waktu. Sistem memilih angka " + randomGuess, player);
+        player.sendMessage("⏰ TIME'S UP! System chose number " + randomGuess + " for you.");
+        broadcast("⏰ Player #" + player.getPlayerId() + " timed out. System chose " + randomGuess, player);
         
-        logResult("Player " + player.getPlayerId() + " timed out, system chose " + randomGuess);
+        logResult("Player #" + player.getPlayerId() + " timed out, system chose " + randomGuess);
         checkNumber(randomGuess, player);
-    }
-
-    // Method untuk mendapatkan angka yang sudah digunakan
-    private static Set<Integer> getUsedNumbers() {
-        return usedNumbers;
     }
 
     public static void broadcast(String message, PlayerHandler sender) throws IOException {
         for (PlayerHandler player : players) {
-            if (player != sender) {
+            if (player != sender && player.isConnected()) {
                 player.sendMessage(message);
             }
         }
@@ -204,48 +290,60 @@ public class Server {
         }
     }
 
-    public static void resetGame() {
+    private static void resetGame() {
         try {
-            Thread.sleep(3000);
-            bombNumber = new Random().nextInt(10) + 1;
+            Thread.sleep(5000); // 5 second delay
+            
+            // Reset game state
+            generateNewBomb();
             gameActive = true;
             gameInProgress = false;
             currentPlayerIndex = 0;
-            usedNumbers.clear();
             
-            // Reset nyawa semua player
+            // Reset all player lives
             for (PlayerHandler player : players) {
-                playerLives.put(player, MAX_LIVES);
+                if (player.isConnected()) {
+                    playerLives.put(player, MAX_LIVES);
+                }
             }
             
-            System.out.println("🔁 Game di-reset. Angka bom baru: " + bombNumber);
-
+            // Remove disconnected players
+            players.removeIf(player -> !player.isConnected());
+            
+            System.out.println("🔄 Game reset completed. Active players: " + players.size());
+            
+            // Notify remaining players
             for (PlayerHandler player : players) {
-                player.sendMessage("RESET_GAME");
-                player.sendMessage("🎮 Game baru dimulai! Anda memiliki " + MAX_LIVES + " nyawa.");
+                if (player.isConnected()) {
+                    player.sendMessage("RESET_GAME");
+                    player.sendMessage("🔄 NEW GAME! You have " + MAX_LIVES + " lives again.");
+                }
             }
             
-            // Restart game otomatis jika masih ada pemain
+            // Auto restart if enough players
             if (players.size() >= 2) {
                 startGame();
+            } else {
+                broadcast("⏳ Waiting for more players to join...", null);
             }
-
+            
         } catch (InterruptedException | IOException e) {
             e.printStackTrace();
         }
     }
 
-    // Getter methods untuk PlayerHandler
+    // Getter methods
     public static int getGuessTimeout() {
         return GUESS_TIMEOUT;
     }
     
     public static int getPlayerLives(PlayerHandler player) {
-        return playerLives.getOrDefault(player, MAX_LIVES);
+        Integer lives = playerLives.get(player);
+        return lives != null ? Math.max(0, lives) : 0;
     }
     
-    public static int getCurrentPlayerIndex() {
-        return currentPlayerIndex;
+    public static Set<Integer> getUsedNumbers() {
+        return new HashSet<>(usedNumbers);
     }
     
     public static boolean isGameInProgress() {
@@ -253,6 +351,6 @@ public class Server {
     }
     
     public static List<PlayerHandler> getPlayers() {
-        return players;
+        return new ArrayList<>(players);
     }
 }
