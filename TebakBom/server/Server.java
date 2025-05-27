@@ -35,30 +35,35 @@ public class Server {
         }
     }
 
-    public static void main(String[] args) throws IOException {
-        ServerSocket serverSocket = new ServerSocket(PORT);
-        System.out.println("Server started. Waiting for players...");
+   public static void main(String[] args) throws IOException {
+    ServerSocket serverSocket = new ServerSocket(PORT);
+    System.out.println("Server started. Waiting for players...");
 
-        bombNumber = new Random().nextInt(10) + 1;
-        System.out.println("Bom berada di angka: " + bombNumber);
+    bombNumber = new Random().nextInt(10) + 1;
+    System.out.println("Bom berada di angka: " + bombNumber);
 
-        while (true) {
-            Socket socket = serverSocket.accept();
-            PlayerHandler player = new PlayerHandler(socket, players.size() + 1);
-            players.add(player);
-            playerLives.put(player, MAX_LIVES); // Set 3 nyawa untuk player baru
-            new Thread(player).start();
-            
-            // Beritahu player tentang nyawa mereka
-            player.sendMessage("🎮 Selamat datang! Anda memiliki " + MAX_LIVES + " nyawa.");
-            player.sendMessage("⏱️ Anda memiliki " + GUESS_TIMEOUT + " detik untuk menebak setiap giliran.");
-            
-            // Auto start game jika sudah ada 2 pemain
-            if (players.size() >= 2 && !gameInProgress) {
-                startGame();
-            }
+    while (true) {
+        Socket socket = serverSocket.accept();
+        PlayerHandler player = new PlayerHandler(socket, players.size() + 1);
+        players.add(player);
+        playerLives.put(player, MAX_LIVES); // Set 3 nyawa untuk player baru
+        new Thread(player).start();
+        
+        // Beritahu player tentang posisi mereka dan info join
+        System.out.println("👤 Player #" + player.getPlayerId() + " bergabung! Total pemain: " + players.size());
+        player.sendMessage("👤 Anda adalah Player #" + player.getPlayerId());
+        player.sendMessage("🎮 Selamat datang! Anda memiliki " + MAX_LIVES + " nyawa.");
+        player.sendMessage("⏱️ Anda memiliki " + GUESS_TIMEOUT + " detik untuk menebak setiap giliran.");
+        
+        // Broadcast ke semua player lain bahwa ada player baru
+        broadcast("👤 Player #" + player.getPlayerId() + " bergabung! Total pemain: " + players.size(), player);
+        
+        // Auto start game jika sudah ada 2 pemain
+        if (players.size() >= 2 && !gameInProgress) {
+            startGame();
         }
     }
+}
 
     // Method untuk memulai game
     public static synchronized void startGame() throws IOException {

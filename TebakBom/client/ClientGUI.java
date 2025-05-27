@@ -68,56 +68,58 @@ public class ClientGUI extends JFrame {
     }
 
     private void regenerateButtons() {
-        buttonPanel.removeAll();
-        List<Integer> numbers = new ArrayList<>();
-        for (int i = 1; i <= 9; i++) numbers.add(i);
-        Collections.shuffle(numbers);
+    buttonPanel.removeAll();
+    List<Integer> numbers = new ArrayList<>();
+    for (int i = 1; i <= 9; i++) numbers.add(i);
+    Collections.shuffle(numbers);
 
-        for (int i = 0; i < 9; i++) {
-            int number = numbers.get(i);
-            JButton button = new JButton(String.valueOf(number));
-            button.setFont(new Font("Poppins", Font.BOLD, 22));
-            button.setBackground(new Color(0x3f78e0));
-            button.setForeground(Color.WHITE);
-            button.setFocusPainted(false);
-            button.setCursor(new Cursor(Cursor.HAND_CURSOR));
-            button.setBorder(BorderFactory.createLineBorder(new Color(0x3f78e0), 2));
-            button.setOpaque(true);
+    for (int i = 0; i < 9; i++) {
+        int number = numbers.get(i);
+        JButton button = new JButton(String.valueOf(number));
+        button.setFont(new Font("Poppins", Font.BOLD, 22));
+        button.setBackground(new Color(0x3f78e0));
+        button.setForeground(Color.WHITE);
+        button.setFocusPainted(false);
+        button.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        button.setBorder(BorderFactory.createLineBorder(new Color(0x3f78e0), 2));
+        button.setOpaque(true);
+        button.setEnabled(false); // Start dengan disabled
 
-            // Hover effect
-            button.addMouseListener(new java.awt.event.MouseAdapter() {
-                public void mouseEntered(java.awt.event.MouseEvent evt) {
-                    if (button.isEnabled()) {
-                        button.setBackground(new Color(0x2f5cc0));
-                    }
+        // Hover effect
+        button.addMouseListener(new java.awt.event.MouseAdapter() {
+            public void mouseEntered(java.awt.event.MouseEvent evt) {
+                if (button.isEnabled()) {
+                    button.setBackground(new Color(0x2f5cc0));
                 }
+            }
 
-                public void mouseExited(java.awt.event.MouseEvent evt) {
-                    if (button.isEnabled()) {
-                        button.setBackground(new Color(0x3f78e0));
-                    }
+            public void mouseExited(java.awt.event.MouseEvent evt) {
+                if (button.isEnabled()) {
+                    button.setBackground(new Color(0x3f78e0));
                 }
-            });
+            }
+        });
 
-            button.addActionListener(e -> {
-                if (!inputAllowed) return;
-                try {
-                    client.send(String.valueOf(number));
-                    button.setEnabled(false);
-                    inputAllowed = false;
-                } catch (IOException ex) {
-                    showError("❌ Gagal mengirim angka.");
-                }
-            });
+        button.addActionListener(e -> {
+            if (!inputAllowed) return;
+            try {
+                client.send(String.valueOf(number));
+                button.setEnabled(false);
+                button.setBackground(new Color(200, 200, 200));
+                inputAllowed = false;
+            } catch (IOException ex) {
+                showError("❌ Gagal mengirim angka.");
+            }
+        });
 
-            numberButtons[i] = button;
-            buttonPanel.add(button);
-        }
-
-        buttonPanel.revalidate();
-        buttonPanel.repaint();
-        inputAllowed = true;
+        numberButtons[i] = button;
+        buttonPanel.add(button);
     }
+
+    buttonPanel.revalidate();
+    buttonPanel.repaint();
+    inputAllowed = false; // Start dengan false
+}
 
     private void disableButtonByNumber(int number) {
         for (JButton btn : numberButtons) {
@@ -128,52 +130,90 @@ public class ClientGUI extends JFrame {
         }
     }
 
-    private void readMessages() {
-        try {
-            String line;
-            while ((line = client.getReader().readLine()) != null) {
-                area.append(line + "\n");
+private void readMessages() {
+    try {
+        String line;
+        while ((line = client.getReader().readLine()) != null) {
+            final String currentLine = line; // Buat variabel final untuk lambda
+            area.append(line + "\n");
 
-                if (line.contains("Selamat datang")) {
-                    SwingUtilities.invokeLater(this::enableAllButtons);
-                }
+            if (line.contains("Selamat datang")) {
+                SwingUtilities.invokeLater(this::enableAllButtons);
+            }
 
-                if (line.equals("RESET_GAME")) {
-                    SwingUtilities.invokeLater(() -> {
-                        area.append("🔁 Game telah direset!\n");
-                        regenerateButtons();
-                    });
-                }
+            if (line.equals("RESET_GAME")) {
+                SwingUtilities.invokeLater(() -> {
+                    area.append("🔁 Game telah direset!\n");
+                    regenerateButtons();
+                });
+            }
 
-                if (line.startsWith("ANGKA_DIPILIH:")) {
-                    int angka = Integer.parseInt(line.split(":")[1]);
-                    SwingUtilities.invokeLater(() -> disableButtonByNumber(angka));
-                }
+            if (line.startsWith("ANGKA_DIPILIH:")) {
+                int angka = Integer.parseInt(line.split(":")[1]);
+                SwingUtilities.invokeLater(() -> disableButtonByNumber(angka));
+            }
 
-                if (line.contains("Aman") || line.contains("giliran")) {
+            // Handle YOUR_TURN message
+            if (line.equals("YOUR_TURN")) {
+                SwingUtilities.invokeLater(() -> {
                     inputAllowed = true;
-                }
+                    enableAllButtons();
+                    area.append("🎯 Ini giliran Anda! Pilih angka.\n");
+                });
+            }
 
-                if (line.contains("BOOM") || line.contains("terkena bom")) {
-                    SwingUtilities.invokeLater(this::disableAllButtons);
+            // Handle turn messages
+            if (line.startsWith("🎯 Giliran Pemain #")) {
+                SwingUtilities.invokeLater(() -> {
+                    // Disable buttons jika bukan giliran kita
+                    if (!currentLine.contains("YOUR_TURN")) {
+                        inputAllowed = false;
+                        disableAllButtons();
+                    }
+                });
+            }
+
+            if (line.contains("Aman") || line.contains("aman")) {
+                SwingUtilities.invokeLater(() -> {
                     inputAllowed = false;
-                }
+                    disableAllButtons();
+                });
             }
-        } catch (IOException e) {
-            showError("⚠️ Koneksi terputus.");
-        }
-    }
 
-    private void enableAllButtons() {
-        for (JButton btn : numberButtons) {
-            if (btn != null && btn.isEnabled()) {
-                btn.setBackground(new Color(0x3f78e0));
-                btn.setForeground(Color.WHITE);
-                btn.setEnabled(true);
+            if (line.contains("BOOM") || line.contains("terkena bom")) {
+                SwingUtilities.invokeLater(() -> {
+                    inputAllowed = false;
+                    disableAllButtons();
+                });
+            }
+
+            // Handle waiting messages
+            if (line.contains("Bukan giliran Anda") || line.contains("Menunggu")) {
+                SwingUtilities.invokeLater(() -> {
+                    inputAllowed = false;
+                    disableAllButtons();
+                });
             }
         }
-        inputAllowed = true;
+    } catch (IOException e) {
+        showError("⚠️ Koneksi terputus.");
     }
+}
+  private void enableAllButtons() {
+    for (JButton btn : numberButtons) {
+        if (btn != null) {
+            // Re-enable button yang belum dipilih
+            if (btn.getBackground().equals(new Color(200, 200, 200))) {
+                // Jangan enable button yang sudah dipilih (abu-abu)
+                continue;
+            }
+            btn.setEnabled(true);
+            btn.setBackground(new Color(0x3f78e0));
+            btn.setForeground(Color.WHITE);
+        }
+    }
+    inputAllowed = true;
+}
 
     private void disableAllButtons() {
         for (JButton btn : numberButtons) {
@@ -190,6 +230,6 @@ public class ClientGUI extends JFrame {
     }
 
     public static void main(String[] args) {
-        SwingUtilities.invokeLater(() -> new ClientGUI("192.168.3.161", 8010));
+        SwingUtilities.invokeLater(() -> new ClientGUI("192.168.3.44", 8010));
     }
 }

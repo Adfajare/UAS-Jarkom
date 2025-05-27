@@ -2,7 +2,7 @@ package server;
 
 import java.io.*;
 import java.net.*;
-import java.util.concurrent.*;
+import java.util.*;
 
 public class PlayerHandler implements Runnable {
     private Socket socket;
@@ -10,6 +10,7 @@ public class PlayerHandler implements Runnable {
     private BufferedWriter out;
     private int playerId;
     private boolean isMyTurn = false;
+    private Timer timeoutTimer;
 
     public PlayerHandler(Socket socket, int playerId) {
         this.socket = socket;
@@ -41,57 +42,30 @@ public class PlayerHandler implements Runnable {
     public void waitForGuessWithTimeout() throws IOException {
         sendMessage("⏱ Giliran Anda! Masukkan angka 1-10 (Timeout: " + Server.getGuessTimeout() + " detik):");
         sendMessage("Nyawa tersisa: " + Server.getPlayerLives(this));
+        sendMessage("YOUR_TURN"); // Kirim sinyal ke client bahwa ini gilirannya
         
         isMyTurn = true;
-        ExecutorService executor = Executors.newSingleThreadExecutor();
         
-        Future<String> future = executor.submit(() -> {
-            try {
-                String input;
-                while (isMyTurn && (input = in.readLine()) != null) {
-                    return input;
-                }
-                return null;
-            } catch (IOException e) {
-                return null;
-            }
-        });
-        
-        try {
-            String input = future.get(Server.getGuessTimeout(), TimeUnit.SECONDS);
-            
-            if (input != null && isMyTurn) {
-                try {
-                    int guess = Integer.parseInt(input.trim());
-                    if (guess >= 1 && guess <= 10) {
-                        isMyTurn = false;
-                        Server.checkNumber(guess, this);
-                    } else {
-                        sendMessage("❌ Angka harus antara 1-10!");
-                        waitForGuessWithTimeout(); // Minta input lagi
-                    }
-                } catch (NumberFormatException e) {
-                    sendMessage("❌ Input tidak valid. Masukkan angka 1-10!");
-                    waitForGuessWithTimeout(); // Minta input lagi
-                }
-            } else if (isMyTurn) {
-                // Timeout terjadi
-                isMyTurn = false;
-                Server.handlePlayerTimeout(this);
-            }
-            
-        } catch (TimeoutException e) {
-            // Timeout terjadi
-            future.cancel(true);
-            if (isMyTurn) {
-                isMyTurn = false;
-                Server.handlePlayerTimeout(this);
-            }
-        } catch (InterruptedException | ExecutionException e) {
-            e.printStackTrace();
-        } finally {
-            executor.shutdown();
+        // Cancel timer sebelumnya jika ada
+        if (timeoutTimer != null) {
+            timeoutTimer.cancel();
         }
+        
+        // Set timer untuk timeout
+        timeoutTimer = new Timer();
+        timeoutTimer.schedule(new TimerTask() {
+            @Override
+            public void run() {
+                if (isMyTurn) {
+                    isMyTurn = false;
+                    try {
+                        Server.handlePlayerTimeout(PlayerHandler.this);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        }, Server.getGuessTimeout() * 1000);
     }
 
     @Override
@@ -99,30 +73,42 @@ public class PlayerHandler implements Runnable {
         try {
             String msg;
             while ((msg = in.readLine()) != null) {
-                // Handle special messages dari server
-                if (msg.equals("YOUR_TURN")) {
-                    waitForGuessWithTimeout();
-                } else if (msg.equals("RESET_GAME")) {
-                    isMyTurn = false;
-                    // Game direset, tunggu giliran berikutnya
-                } else if (msg.startsWith("ANGKA_DIPILIH:")) {
-                    // Angka sudah dipilih player lain
-                    continue;
-                } else {
-                    // Jika bukan giliran, abaikan input
-                    if (!isMyTurn) {
-                        try {
-                            int guessed = Integer.parseInt(msg.trim());
-                            sendMessage("⏳ Bukan giliran Anda. Menunggu pemain lain...");
-                        } catch (NumberFormatException e) {
-                            // Abaikan input yang bukan angka
+                System.out.println("Player #" + playerId + " mengirim: " + msg); // Debug log
+                
+                // Handle input angka dari client
+                try {
+                    int guess = Integer.parseInt(msg.trim());
+                    
+                    if (isMyTurn) {
+                        if (guess >= 1 && guess <= 10) {
+                            // Cancel timeout timer
+                            if (timeoutTimer != null) {
+                                timeoutTimer.cancel();
+                            }
+                            
+                            isMyTurn = false;
+                            Server.checkNumber(guess, this);
+                        } else {
+                            sendMessage("❌ Angka harus antara 1-10!");
                         }
+                    } else {
+                        // Jika bukan giliran
+                        sendMessage("⏳ Bukan giliran Anda. Menunggu pemain lain...");
+                    }
+                } catch (NumberFormatException e) {
+                    // Input bukan angka, abaikan atau beri pesan error
+                    if (isMyTurn) {
+                        sendMessage("❌ Input tidak valid. Masukkan angka 1-10!");
                     }
                 }
             }
         } catch (IOException e) {
             System.out.println("Pemain #" + playerId + " keluar.");
         } finally {
+            // Cleanup
+            if (timeoutTimer != null) {
+                timeoutTimer.cancel();
+            }
             try {
                 socket.close();
             } catch (IOException e) {
