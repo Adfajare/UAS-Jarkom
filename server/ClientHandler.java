@@ -27,6 +27,7 @@ public class ClientHandler implements Runnable {
             String nameMessage = in.readLine();
             if (nameMessage != null && nameMessage.startsWith("NAME:")) {
                 playerName = nameMessage.substring(5);
+                server.addPlayer(playerName);
                 sendMessage("WELCOME:" + playerName);
             }
             
@@ -50,12 +51,14 @@ public class ClientHandler implements Runnable {
                 if (parts.length > 1) {
                     try {
                         int number = Integer.parseInt(parts[1]);
+                        server.handleGuess(playerName, number);
                     } catch (NumberFormatException e) {
                         sendMessage("ERROR:Invalid number format");
                     }
                 }
                 break;
             case "STOP":
+                server.handlePlayerStop(playerName);
                 break;
             case "PING":
                 sendMessage("PONG");
