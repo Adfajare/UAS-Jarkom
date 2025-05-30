@@ -8,6 +8,8 @@ public class GameClient {
             } catch (Exception e) {
                 e.printStackTrace();
             }
+            
+            new ClientGUI().setVisible(true);
         });
     }
 }
